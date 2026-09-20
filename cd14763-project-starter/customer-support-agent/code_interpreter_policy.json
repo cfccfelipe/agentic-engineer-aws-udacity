@@ -1,0 +1,14 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AgentCoreCodeInterpreterAccess",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock:InvokeCodeInterpreter",
+        "bedrock-agentcore:InvokeCodeInterpreter"
+      ],
+      "Resource": "*"
+    }
+  ]
+}

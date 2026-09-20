@@ -1,0 +1,32 @@
+# Demo Solution: Multi-Model Incident Response
+
+## Architecture
+
+![Architecture Diagram](architecture.svg)
+
+This folder contains the working solution for the Module 2 demo.
+
+## File
+- `incident_response.py` — Complete implementation of a multi-model incident response system.
+
+## What It Demonstrates
+- Creating three BedrockModel instances with different model IDs (Nova Lite, Claude, Nova Pro)
+- Assigning models to agents based on task requirements (fast routing, deep analysis, balanced drafting)
+- Python-orchestrated pipeline across three agents
+- Latency comparison table showing model speed/quality tradeoffs
+
+## Setup
+
+1. Copy the env template: `cp .env.example .env`
+2. Ensure AWS credentials are loaded (use the "Load AWS Credentials" sidebar in the Udacity lab).
+
+## How to Run
+```bash
+python incident_response.py
+```
+
+## Expected Output
+- INC-001 (CPU spike) -> Critical -> Root cause analysis -> Urgent status update
+- INC-002 (Disk usage) -> Warning -> Root cause analysis -> Proactive alert
+- INC-003 (Deployment) -> Info -> Normal activity -> Brief status update
+- Latency comparison table (Nova Lite fastest, Claude slowest)

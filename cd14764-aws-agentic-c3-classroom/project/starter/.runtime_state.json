@@ -1,0 +1,1 @@
+{"environmentVariables": {"AGENT_LOG_GROUP": "/aws/bedrock/agentcore/udacity-agentcore", "AGENT_LOG_LEVEL": "INFO", "AGENT_LOG_TO_CLOUDWATCH": "true", "AGENT_TRACING_ENABLED": "true", "AGENT_TRACE_SAMPLING_RATE": "1.0"}}
