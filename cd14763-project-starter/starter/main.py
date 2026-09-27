@@ -29,6 +29,10 @@ import os
 import boto3
 from bedrock_agentcore.memory import MemoryClient
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
+from bedrock_agentcore.tools.code_interpreter_client import (
+    CodeInterpreter,
+    code_session,
+)
 from botocore.config import Config
 from strands import Agent, tool
 from strands.hooks import (
@@ -40,9 +44,6 @@ from strands.hooks import (
 from strands.models import BedrockModel
 from strands.tools.mcp.mcp_client import MCPClient
 from strands_tools.browser import AgentCoreBrowser
-from strands_tools.code_interpreter import (
-    AgentCoreCodeInterpreter,
-)
 
 logging.basicConfig(level=logging.WARNING)
 agent_logger = logging.getLogger("CSAI_Agent")
@@ -122,7 +123,7 @@ bedrock_runtime_client = boto3.client("bedrock-agent-runtime", region_name=REGIO
 #   { "SEMANTIC": "cs_agent/{actorId}/facts",
 #     "USER_PREFERENCE": "cs_agent/{actorId}/preferences" }
 
-code_interpreter_utility = AgentCoreCodeInterpreter(region=REGION)
+code_interpreter_utility = CodeInterpreter(region=REGION)
 browser_utility = AgentCoreBrowser(region=REGION, session_timeout=60)
 
 
@@ -384,10 +385,10 @@ def calculate_loyalty_discount(
     AgentCore Code Interpreter. Runs exact arithmetic in a secure sandbox.
 
     Args:
-        loyalty_points:   Customer's current points balance
-        tier:             Customer tier — Silver, Gold, or Platinum
-        order_total:      Order total in USD
-        product_category: standard, device, or fresh
+        loyalty_points:    Customer's current points balance
+        tier:              Customer tier — Silver, Gold, or Platinum
+        order_total:       Order total in USD
+        product_category:  standard, device, or fresh
 
     Returns:
         Full discount breakdown and final price
@@ -400,38 +401,102 @@ def calculate_loyalty_discount(
             "error": "Execution limit reached for loyalty calculation.",
             "final_total": order_total,
             "total_savings": 0.0,
+            "tier_discount_pct": 0.0,
         })
 
-    earn_rates = {"standard": 1, "device": 2, "fresh": 5}
-    tier_rates = {"Silver": 0.00, "Gold": 0.10, "Platinum": 0.15}
+    # Build self-contained Python code string to execute via Code Interpreter
+    code_string = f"""
+import math
+import json
 
-    max_points_discount = order_total * 0.50
-    max_usable_points = int(max_points_discount * 100)
-    points_to_use = min(int(loyalty_points), max_usable_points)
-    points_redeemed = math.floor(points_to_use / 500) * 500
-    points_discount = points_redeemed / 100.0
+loyalty_points = {loyalty_points}
+tier = "{tier}"
+order_total = {order_total}
+product_category = "{product_category}"
 
-    subtotal_after_points = order_total - points_discount
-    tier_discount_rate = tier_rates.get(tier, 0.0)
-    tier_discount = round(subtotal_after_points * tier_discount_rate, 2)
+earn_rates = {{"standard": 1, "device": 2, "fresh": 5}}
+tier_rates = {{"Silver": 0.00, "Gold": 0.10, "Platinum": 0.15}}
 
-    final_total = round(subtotal_after_points - tier_discount, 2)
-    total_savings = round(points_discount + tier_discount, 2)
-    earn_rate = earn_rates.get(product_category, 1)
-    points_earned = int(final_total * earn_rate)
-    remaining_points = int(loyalty_points) - points_redeemed + points_earned
+max_points_discount = order_total * 0.50
+max_usable_points = int(max_points_discount * 100)
+points_to_use = min(int(loyalty_points), max_usable_points)
+points_redeemed = math.floor(points_to_use / 500) * 500
+points_discount = points_redeemed / 100.0
 
-    return json.dumps({
-        "original_total": order_total,
-        "points_redeemed": points_redeemed,
-        "points_discount": points_discount,
-        "tier": tier,
-        "tier_discount": tier_discount,
-        "final_total": final_total,
-        "total_savings": total_savings,
-        "points_earned": points_earned,
-        "remaining_points": remaining_points,
-    })
+subtotal_after_points = order_total - points_discount
+tier_discount_rate = tier_rates.get(tier, 0.0)
+tier_discount = round(subtotal_after_points * tier_discount_rate, 2)
+
+final_total = round(subtotal_after_points - tier_discount, 2)
+total_savings = round(points_discount + tier_discount, 2)
+earn_rate = earn_rates.get(product_category, 1)
+points_earned = int(final_total * earn_rate)
+remaining_points = int(loyalty_points) - points_redeemed + points_earned
+
+result = {{
+    "original_total": order_total,
+    "points_redeemed": points_redeemed,
+    "points_discount": points_discount,
+    "tier": tier,
+    "tier_discount_pct": float(tier_discount_rate),
+    "tier_discount": tier_discount,
+    "final_total": final_total,
+    "total_savings": total_savings,
+    "points_earned": points_earned,
+    "remaining_points": remaining_points,
+}}
+print(json.dumps(result))
+"""
+
+    try:
+        with code_session(REGION) as session:
+            result_events = session.invoke(
+                "executeCode",
+                {
+                    "code": code_string,
+                    "language": "python",
+                    "clearContext": True,
+                },
+            )
+            for event in result_events:
+                output = event.get("output") or event.get("stdout", "")
+                if output:
+                    return str(output).strip()
+            return json.dumps({"error": "No output from code interpreter."})
+
+    except Exception:
+        # Fallback path if Code Interpreter is unavailable
+        earn_rates = {"standard": 1, "device": 2, "fresh": 5}
+        tier_rates = {"Silver": 0.00, "Gold": 0.10, "Platinum": 0.15}
+
+        max_points_discount = order_total * 0.50
+        max_usable_points = int(max_points_discount * 100)
+        points_to_use = min(int(loyalty_points), max_usable_points)
+        points_redeemed = math.floor(points_to_use / 500) * 500
+        points_discount = points_redeemed / 100.0
+
+        subtotal_after_points = order_total - points_discount
+        tier_discount_rate = tier_rates.get(tier, 0.0)
+        tier_discount = round(subtotal_after_points * tier_discount_rate, 2)
+
+        final_total = round(subtotal_after_points - tier_discount, 2)
+        total_savings = round(points_discount + tier_discount, 2)
+        earn_rate = earn_rates.get(product_category, 1)
+        points_earned = int(final_total * earn_rate)
+        remaining_points = int(loyalty_points) - points_redeemed + points_earned
+
+        return json.dumps({
+            "original_total": order_total,
+            "points_redeemed": points_redeemed,
+            "points_discount": points_discount,
+            "tier": tier,
+            "tier_discount_pct": float(tier_discount_rate),
+            "tier_discount": tier_discount,
+            "final_total": final_total,
+            "total_savings": total_savings,
+            "points_earned": points_earned,
+            "remaining_points": remaining_points,
+        })
 
 
 # ── TODO 8 — Agent Entrypoint ─────────────────────────────────────────────────
@@ -554,4 +619,4 @@ def main():
 if __name__ == "__main__":
     app.run()
     # Uncomment the line below and comment app.run() for local CLI testing:
-    main()
+    # main()
